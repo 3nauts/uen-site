@@ -1,15 +1,19 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function Login() {
   const [cpf, setCpf] = useState("");
   const navigate = useNavigate();
+  const { login } = useAuth();
 
-  function handleSubmit(e) {
+  interface HandleSubmitEvent extends React.FormEvent<HTMLFormElement> { }
+
+  function handleSubmit(e: HandleSubmitEvent): void {
     e.preventDefault();
-    // Simulação: se CPF termina em par, vai para área do cliente
-    const clienteExiste = parseInt(cpf.replace(/\D/g, "").slice(-1)) % 2 === 0;
-    if (clienteExiste) {
+    login(cpf);
+
+    if (cpf === "123.456.789-00") {
       navigate(`/cliente/${cpf}`);
     } else {
       navigate("/cadastro");
@@ -20,7 +24,7 @@ export default function Login() {
     <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-br from-[#009c3b] via-[#ffcc29] to-[#006837] p-4">
       {/* Logo UEN */}
       <img
-        src="https://uenestudantil.org/img/logo-uen.2b7e825d.png"
+        src="/uen-logo.png"
         alt="Logomarca UEN"
         className="w-32 md:w-40 mb-6 drop-shadow-xl"
         style={{ filter: "drop-shadow(0 2px 12px #00683755)" }}
