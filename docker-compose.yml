@@ -1,0 +1,21 @@
+version: '3.9'
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: uen_local
+      MYSQL_USER: uen
+      MYSQL_PASSWORD: uen
+    ports: ["3307:3306"]
+    volumes: ["./_mysql_data:/var/lib/mysql"]
+    command: ["--default-authentication-plugin=mysql_native_password","--character-set-server=utf8mb4","--collation-server=utf8mb4_unicode_ci"]
+  web:
+    build: .
+    environment:
+      DATABASE_URL: mysql://uen:uen@db:3306/uen_local?connection_limit=5
+      NEXT_PUBLIC_BASE_URL: http://localhost:3000
+    ports: ["3000:3000"]
+    depends_on: [db]
+    volumes: ["./uploads:/app/uploads"]

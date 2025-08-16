@@ -11,7 +11,7 @@ export default function Login() {
 
   function handleSubmit(e: HandleSubmitEvent): void {
     e.preventDefault();
-    login(cpf);
+    login();
 
     if (cpf === "123.456.789-00") {
       navigate(`/cliente/${cpf}`);
