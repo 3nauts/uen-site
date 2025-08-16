@@ -1,4 +1,4 @@
-// File: C:\3nauts\repos\uen-site\app\(public)\cadastro\page.tsx
+// File: D:\3nauts\repos\uen-site\app\(public)\cadastro\page.tsx
 import * as entry from '../../../../../app/(public)/cadastro/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
