@@ -1,4 +1,12 @@
 {
-  "/page": "app/page.js",
-  "/(public)/cadastro/page": "app/(public)/cadastro/page.js"
+  "/pagamento/[periodoId]/page": "app/pagamento/[periodoId]/page.js",
+  "/area-aluno/page": "app/area-aluno/page.js",
+  "/(public)/login/page": "app/(public)/login/page.js",
+  "/(public)/cadastro/page": "app/(public)/cadastro/page.js",
+  "/api/users/route": "app/api/users/route.js",
+  "/api/payment/route": "app/api/payment/route.js",
+  "/api/cliente/[cpf]/route": "app/api/cliente/[cpf]/route.js",
+  "/api/auth/cpf-check/route": "app/api/auth/cpf-check/route.js",
+  "/api/cliente/[cpf]/carteirinha/route": "app/api/cliente/[cpf]/carteirinha/route.js",
+  "/(public)/cliente/[cpf]/page": "app/(public)/cliente/[cpf]/page.js"
 }

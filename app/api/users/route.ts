@@ -1,40 +1,144 @@
-import { prisma } from '@/lib/prisma';
-import { NextRequest } from 'next/server';
-import formidable from 'formidable';
-import fs from 'fs'; import path from 'path';
-export const dynamic = 'force-dynamic';
-function ensureDir(d:string){ if(!fs.existsSync(d)) fs.mkdirSync(d,{recursive:true}); }
-async function parseForm(req:NextRequest){
-  const base = path.join(process.cwd(),'uploads');
-  ['','/fotos','/documentos'].forEach(s=>ensureDir(base+s));
-  const form = formidable({ multiples:false, uploadDir: base, keepExtensions:true,
-    filename:(_n,_e,p)=>`${Date.now()}-${p.originalFilename?.normalize('NFD').replace(/[^\w.\-]+/g,'_')}`,
-    filter:(part)=>!!part.mimetype });
-  return await new Promise((res,rej)=>form.parse(req as any,(err,fields,files)=>err?rej(err):res({fields,files})));
+// app/api/users/route.ts
+import { NextResponse } from "next/server";
+import {prisma} from "@/lib/prisma";
+import { writeFile, mkdir } from "fs/promises";
+import path from "path";
+
+// 🔹 Função utilitária para normalizar CPF (remove tudo que não for dígito)
+function normalizeCPF(cpf: string) {
+  return cpf.replace(/\D/g, "");
 }
-export async function POST(req:NextRequest){
-  try{
-    const { fields, files }: any = await parseForm(req);
-    const b:any = Object.fromEntries(Object.entries(fields).map(([k,v]:any)=>[k,Array.isArray(v)?v[0]:v]));
-    const nasc = b.dataNascimento || b.nascimento;
-    if(!b.nome || !b.cpf || !nasc) return Response.json({ ok:false, error:'CAMPOS_OBRIGATORIOS' }, { status:400 });
-    const cpf = String(b.cpf).replace(/\D/g,'');
-    if(cpf.length!==11) return Response.json({ ok:false, error:'CPF_INVALIDO' }, { status:400 });
-    const ex = await prisma.cliente.findUnique({ where:{ cpf } });
-    if(ex) return Response.json({ ok:false, error:'CPF_JA_CADASTRADO' }, { status:409 });
-    const foto:any = files?.foto?.[0] || files?.foto;
-    const doc:any  = files?.documento?.[0] || files?.documento;
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
-    const fotoUrl = foto ? `${baseUrl}/api/uploads/fotos/${path.basename(foto.filepath)}` : undefined;
-    const documentoUrl = doc ? `${baseUrl}/api/uploads/documentos/${path.basename(doc.filepath)}` : undefined;
-    const cliente = await prisma.cliente.create({ data: {
-      cpf, nome:b.nome, dataNascimento:new Date(nasc), telefone:b.telefone, email:b.email, rg:b.rg,
-      ensino:b.ensino, curso:b.curso, instituicao:b.instituicao, cep:b.cep, endereco:b.endereco, numero:b.numero,
-      bairro:b.bairro, cidade:b.cidade, uf:b.uf, fotoUrl, documentoUrl,
-      anoVigente: b.anoVigente ? Number(b.anoVigente) : new Date().getFullYear(),
-      dataExpiracao: b.dataExpiracao ? new Date(b.dataExpiracao) : undefined
-    }});
-    const pedido = await prisma.pedido.create({ data: { clienteId: cliente.id, tipo: b.tipo ?? 'digital', valorCentavos: b.valorCentavos ? Number(b.valorCentavos) : 3000 } });
-    return Response.json({ ok:true, cliente, pedido, next:'client' }, { status:201 });
-  }catch(e){ console.error(e); return Response.json({ ok:false, error:'SERVER_ERROR' }, { status:500 }); }
+
+// 🔹 Função utilitária para habilitar CORS
+function corsResponse(body: any, status = 200) {
+  return new NextResponse(JSON.stringify(body), {
+    status,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    },
+  });
+}
+
+export async function OPTIONS() {
+  return corsResponse({}, 200);
+}
+
+export async function POST(req: Request) {
+  try {
+    const formData = await req.formData();
+
+    // Normaliza CPF antes de usar
+    const rawCpf = formData.get("cpf") as string;
+    if (!rawCpf) {
+      return corsResponse({ error: "CPF é obrigatório" }, 400);
+    }
+    const cpf = normalizeCPF(rawCpf);
+
+    // 🔎 Verifica se já existe cliente
+    let cliente = await prisma.cliente.findUnique({ where: { cpf } });
+
+    if (cliente) {
+      // Já existe → retorna cliente para direcionar Área do Aluno
+      return corsResponse(
+        { success: true, usuario: cliente, jaExistente: true },
+        200
+      );
+    }
+
+    // 🔹 Campos obrigatórios
+    const nome = formData.get("nome") as string;
+    const dataNascimento = new Date(formData.get("dataNascimento") as string);
+
+    // 🔹 Campos opcionais
+    const telefone = (formData.get("telefone") as string) || null;
+    const email = (formData.get("email") as string) || null;
+    const rg = (formData.get("rg") as string) || null;
+    const ensino = (formData.get("ensino") as string) || null;
+    const curso = (formData.get("curso") as string) || null;
+    const instituicao = (formData.get("instituicao") as string) || null;
+    const cep = (formData.get("cep") as string) || null;
+    const endereco = (formData.get("endereco") as string) || null;
+    const numero = (formData.get("numero") as string) || null;
+    const bairro = (formData.get("bairro") as string) || null;
+    const cidade = (formData.get("cidade") as string) || null;
+    const uf = (formData.get("uf") as string) || null;
+
+    // 🔹 Uploads
+    const foto = formData.get("foto") as File | null;
+    const documento = formData.get("documento") as File | null;
+
+    const fotosDir = path.join(process.cwd(), "public", "uploads", "fotos");
+    const docsDir = path.join(process.cwd(), "public", "uploads", "documentos");
+
+    await mkdir(fotosDir, { recursive: true });
+    await mkdir(docsDir, { recursive: true });
+
+    let fotoUrl: string | null = null;
+    let documentoUrl: string | null = null;
+
+    if (foto) {
+      const bytes = await foto.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+      const fileName = `${cpf}_foto_${Date.now()}${path.extname(foto.name)}`;
+      await writeFile(path.join(fotosDir, fileName), buffer);
+      fotoUrl = `/uploads/fotos/${fileName}`;
+    }
+
+    if (documento) {
+      const bytes = await documento.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+      const fileName = `${cpf}_doc_${Date.now()}${path.extname(documento.name)}`;
+      await writeFile(path.join(docsDir, fileName), buffer);
+      documentoUrl = `/uploads/documentos/${fileName}`;
+    }
+
+    // 🔹 Cria novo cliente
+    cliente = await prisma.cliente.create({
+      data: {
+        cpf,
+        nome,
+        dataNascimento,
+        telefone,
+        email,
+        rg,
+        ensino,
+        curso,
+        instituicao,
+        cep,
+        endereco,
+        numero,
+        bairro,
+        cidade,
+        uf,
+        fotoUrl,
+        documentoUrl,
+        anoVigente: new Date().getFullYear(),
+        dataExpiracao: new Date(
+          new Date().setFullYear(new Date().getFullYear() + 1)
+        ), // +1 ano
+      },
+    });
+
+    return corsResponse(
+      { success: true, usuario: cliente, jaExistente: false },
+      201
+    );
+  } catch (error: any) {
+    console.error("Erro ao salvar cadastro:", error);
+    return corsResponse({ error: "Erro ao processar cadastro" }, 500);
+  }
+}
+
+export async function GET() {
+  try {
+    const clientes = await prisma.cliente.findMany({
+      orderBy: { criadoEm: "desc" },
+    });
+    return corsResponse({ success: true, usuarios: clientes }, 200);
+  } catch (error: any) {
+    console.error("Erro ao listar clientes:", error);
+    return corsResponse({ error: "Erro ao listar clientes" }, 500);
+  }
 }

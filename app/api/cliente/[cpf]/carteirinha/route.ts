@@ -1,18 +1,100 @@
-import { prisma } from '@/lib/prisma'; import QRCode from 'qrcode';
-export async function GET(_:Request,{params}:{params:{cpf:string}}){
-  try{
-    const cpf = params.cpf.replace(/\D/g,'');
-    if(cpf.length!==11) return Response.json({ ok:false, error:'CPF_INVALIDO' }, { status:400 });
-    const c = await prisma.cliente.findUnique({ where:{ cpf } });
-    if(!c) return Response.json({ ok:false, error:'CLIENTE_NAO_ENCONTRADO' }, { status:404 });
-    const ano = c.anoVigente ?? new Date().getFullYear();
-    const iso = c.dataNascimento.toISOString();
-    const dataUrl = await QRCode.toDataURL(`${cpf}|${iso.substring(0,10)}|${ano}`, { margin:1, scale:6 });
-    const base = process.env.NEXT_PUBLIC_BASE_URL || '';
-    return Response.json({ ok:true, carteirinha:{
-      nome:c.nome, cpf:c.cpf, dataNascimento: iso.substring(0,10), instituicao:c.instituicao, curso:c.curso, ano,
-      validade: c.dataExpiracao?.toISOString().substring(0,10) ?? null, fotoUrl:c.fotoUrl,
-      qrcodeDataUrl: dataUrl, qrcodeDownload: `${base}/api/cliente/${cpf}/carteirinha/qrcode.png`
-    }});
-  }catch(e){ console.error(e); return Response.json({ ok:false, error:'SERVER_ERROR' }, { status:500 }); }
+// app/api/cliente/[cpf]/carteirinha/route.ts
+import { NextResponse } from "next/server";
+import {prisma} from "@/lib/prisma";
+import QRCode from "qrcode";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+
+export async function GET(
+  req: Request,
+  { params }: { params: { cpf: string } }
+) {
+  try {
+    const cliente = await prisma.cliente.findUnique({
+      where: { cpf: params.cpf },
+    });
+
+    if (!cliente) {
+      return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
+    }
+
+    if (!cliente.dataExpiracao || cliente.dataExpiracao < new Date()) {
+      return NextResponse.json(
+        { error: "Carteirinha expirada. Faça a renovação." },
+        { status: 400 }
+      );
+    }
+
+    // 🔹 Gera QR Code com CPF (pode trocar por URL de validação)
+    const qrDataUrl = await QRCode.toDataURL(cliente.cpf);
+
+    // 🔹 Cria PDF
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([350, 200]);
+    const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    // Fundo
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: 350,
+      height: 200,
+      color: rgb(0.0, 0.6, 0.2),
+    });
+
+    // Nome
+    page.drawText(cliente.nome, {
+      x: 20,
+      y: 160,
+      size: 16,
+      font,
+      color: rgb(1, 1, 1),
+    });
+
+    // Instituição
+    if (cliente.instituicao) {
+      page.drawText(`Instituição: ${cliente.instituicao}`, {
+        x: 20,
+        y: 140,
+        size: 12,
+        font,
+        color: rgb(1, 1, 1),
+      });
+    }
+
+    // Validade
+    page.drawText(
+      `Validade: ${cliente.dataExpiracao.toLocaleDateString("pt-BR")}`,
+      {
+        x: 20,
+        y: 120,
+        size: 12,
+        font,
+        color: rgb(1, 1, 1),
+      }
+    );
+
+    // QR Code
+    const qrImageBytes = Buffer.from(qrDataUrl.split(",")[1], "base64");
+    const qrImage = await pdfDoc.embedPng(qrImageBytes);
+    page.drawImage(qrImage, {
+      x: 250,
+      y: 80,
+      width: 80,
+      height: 80,
+    });
+
+    const pdfBytes = await pdfDoc.save();
+    const pdfBuffer = Buffer.from(pdfBytes);
+
+    return new NextResponse(pdfBuffer, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="carteirinha-${cliente.cpf}.pdf"`,
+      },
+    });
+  } catch (error) {
+    console.error("Erro ao gerar carteirinha:", error);
+    return NextResponse.json({ error: "Erro ao gerar carteirinha" }, { status: 500 });
+  }
 }
